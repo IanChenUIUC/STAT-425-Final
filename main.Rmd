@@ -1,0 +1,265 @@
+---
+title: "External Factors on Performance via Reaction Time Testing"
+author: "Ian Chen"
+date:  2025-05-01
+output:
+    bookdown::pdf_document2:
+        toc: false
+        latex_engine: xelatex
+---
+
+# Abstract
+
+**Purpose**:
+In this study, we investigate the effect of lifestyle and mental state on students' mental acuity 
+We also characterize a set of confounders which play into one's environment.
+**Methods**:
+We conduct a survey for the students of an introductory statistics class at the University of Illinois, Urbana Champaign.
+Through ANOVA testing, we determine features of the environment that are significantly correlated with students' reaction time, a proxy for their performance.
+**Results**:
+High stress levels were associated with degraded performance on average.
+However, for atheletes, this effect was reversed, with them improving with higher stress.
+We did not find any association due to fatigue levels, nor distraction-free environments.
+**Implications**:
+Stress is commonplace in academic settings, and so there is interest in developing systems to deal with stress.
+This study shows that we need different priorities when helping athletes and gamers.
+Moreover, there may need to be an re-evaluation towards the beneficial effects of sleep and distraction-free environments.
+
+# Introduction
+
+It is common wisdom that a healthy lifestyle is crucial to maintain academic performance.
+In this study, we explore which indicators are significantly correlated with reaction time, a proxy for their performance.
+
+## Investigative Questions
+
+Here, we have three primary research questions:
+
+1. Does impaired mental state affect students' performance on aim trainers?
+2. Are there environmental factors consistent with impared mental state?
+3. Does the above change when taking into account games or sport activity?
+
+# Materials and Methods
+
+We collect our dataset from introductory statistics students at the University of Illinois, Urbana Champaign.
+An online survey was posted that all students needed to fill in, and was graded (i.e. it was not anonymized).
+Students had a week to submit the form, and could do so asynchronously.
+
+All students submitted their scores for their first three attempts.
+In this study, we will take their median response.
+
+First, we only consider datapoints that have Stable Wifi (so we remove 2 points).
+Nexxt, to control for disparities in technology, we pre-filter our dataset to only include the input devices for *Mouse* and *Trackpad*.
+Moreover, to make sure we are not overfitting, we partition into 90% training and 10% testing.
+Fitting models on the training set, we verify *a posteriori* whether the results are consistent on the testing set.
+Finally, we conduct a differential study (fitting different models) on each category.
+
+```{r echo = F, results='hide', error=F, warning=F, message=F}
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(dplyr)
+library(gridExtra)
+library(MASS)
+library(GGally)
+library(leaps)
+library(splines)
+library(pls)
+library(glmnet)
+library(faraway)
+```
+
+```{r echo = F, results='hide'}
+survey <- read.csv("Survey.csv")
+
+# partitioning the dataset, as described in Sec. Materials and Methods
+data <- survey[survey$InputDevice %in% c("Mouse", "Trackpad"),]
+data <- data[data$WiFi == "Stable", ]
+data$time <- apply(data[, c("First", "Second", "Third")], 1, median)
+data.test <- data[seq(10, nrow(data), by = 10),]
+data.train <- data[-seq(10, nrow(data), by = 10), ]
+data.train.mouse <- data.train[data.train$InputDevice == "Mouse", ]
+data.train.track <- data.train[data.train$InputDevice == "Trackpad", ]
+data.test.mouse <- data.test[data.test$InputDevice == "Mouse", ]
+data.test.track <- data.test[data.test$InputDevice == "Trackpad", ]
+```
+
+```{r tab1, echo = F}
+tab1 <- matrix(c(nrow(data.train.mouse), nrow(data.train.track), nrow(data.train), nrow(data.test.mouse), nrow(data.test.track), nrow(data.test)), nrow = 2, byrow = TRUE)
+rownames(tab1) <- c("Training", "Testing")
+colnames(tab1) <- c("Mouse", "Trackpad", "Total")
+knitr::kable(tab1, caption = "\\label{tabs:tab1} Dataset Properties", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+<!-- TODO: Add the columns for ActiveSports and ActiveGames, done below into this figure -->
+
+After filtering, we have 118 datapoints in the training and 13 entries in the testing set, with marginally more datapoints for the trackpad condition (Table \ref{tab:tab1}).
+
+# Exploratory Data Analysis
+
+```{r fig1, echo = F, fig.cap="\\label{figs:fig1} Distribution of Response Variable on the Training Dataset. The x-axis describes the average response time in milliseconds. The y-axis describes the number of results. Left: Using the mouse input device. Right: Using the trackpad input device."}
+par(mfrow = c(1, 2), mar = c(3, 3, 2, 1))
+hist(data.train.mouse$time, xlab = "Response Time (ms)", ylab = "Count", main = "")
+hist(data.train.track$time, xlab = "Response Time (ms)", ylab = "Count", main = "")
+```
+
+```{r fig2, echo = F, fig.cap="\\label{figs:fig2} Frequency of Stress and Fatigue on the Training Dataset. The x-axis describes the amount of stress or fatigue, in ascending levels. The y-axis describes the number of results. Top: Using the mouse input device. Bot: Using the trackpad input device. Left: Stress. Right: Fatigue."}
+
+# Organizing it in ascending frequency
+data.train.mouse$Stress <- factor(data.train.mouse$Stress, levels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+data.train.mouse$Fatigue <- factor(data.train.mouse$Fatigue, levels = c("Not fatigued at all", "Slightly Fatigued", "Moderately fatigued", "Very fatigued", "Extremely fatigued"), labels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+data.train.track$Stress <- factor(data.train.track$Stress, levels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+data.train.track$Fatigue <- factor(data.train.track$Fatigue, levels = c("Not fatigued at all", "Slightly Fatigued", "Moderately fatigued", "Very fatigued", "Extremely fatigued"), labels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+
+par(mfrow = c(2, 2), mar = c(1, 4, 1, 1))
+barplot(table(data.train.mouse$Stress), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.mouse$Fatigue), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.track$Stress), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.track$Fatigue), xlab = "Count", main = "", las = 2, horiz = TRUE)
+```
+
+```{r fig3, echo = F, fig.cap="\\label{figs:fig3} Frequency of Sports and VideoGame Activity on the Training Dataset. The x-axis describes the frequency of performing the activity, in ascending frequency. The y-axis describes the number of results. Top: Using the mouse input device. Bot: Using the trackpad input device. Left: Playing any sort of sports. Right: Playing any kind of video games."}
+# Organizing it in ascending frequency
+data.train.mouse$SportsPlay <- factor(data.train.mouse$SportsPlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
+data.train.mouse$VideoGamePlay <- factor(data.train.mouse$VideoGamePlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
+data.train.track$SportsPlay <- factor(data.train.track$SportsPlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
+data.train.track$VideoGamePlay <- factor(data.train.track$VideoGamePlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
+
+par(mfrow = c(2, 2), mar = c(1, 4, 2, 1))
+barplot(table(data.train.mouse$SportsPlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.mouse$VideoGamePlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.track$SportsPlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
+barplot(table(data.train.track$VideoGamePlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
+
+# Same results, but in table form
+# table1a <- data.train %>% count(SportsPlay)
+# table1b <- data.train %>% count(VideoGamePlay)
+# gridExtra::grid.arrange(grobs = list(gridExtra::tableGrob(table1a), gridExtra::tableGrob(table1b)), ncol = 2)
+```
+
+We see that the response variable is roughly normally distributed across all conditions (Figure \ref{figs:fig1}, Figure \ref{figs:fig2}).
+This is similar for the video game activity, except for the *Mouse* users that seem to play *Video* games more often than other categories (Figure \ref{figs:fig3}).
+
+Since there is only one datapoint for high stress and fatigue, we remove them from our study.
+```{r, echo = F}
+data.train.mouse <- data.train.mouse[data.train.mouse$Fatigue != "Very High", ]
+data.train.track <- data.train.track[data.train.track$Fatigue != "Very High", ]
+data.train.mouse <- data.train.mouse[data.train.mouse$Stress != "Very High", ]
+data.train.track <- data.train.track[data.train.track$Stress != "Very High", ]
+data.train.mouse$Stress <- factor(data.train.mouse$Stress, levels = c("Very Low", "Low", "Moderate", "High"))
+data.train.mouse$Fatigue <- factor(data.train.mouse$Fatigue, levels = c("Very Low", "Low", "Moderate", "High"))
+data.train.track$Stress <- factor(data.train.track$Stress, levels = c("Very Low", "Low", "Moderate", "High"))
+data.train.track$Fatigue <- factor(data.train.track$Fatigue, levels = c("Very Low", "Low", "Moderate", "High"))
+```
+
+# Model Building
+
+## Research Question One
+
+We investigate the effect of one's mental state on their performance, for the *Mouse* condition.
+
+```{r fig4, echo = F, fig.cap="\\label{figs:fig4} Median response time based on Fatigue and Stress levels. The y-axis shows the median response time across three trials. Left: Increasing Fatigue. Right: Increasing Stress."}
+plot1 <- ggplot(data.train.mouse, aes(x = Fatigue, y = time)) + geom_boxplot()
+plot2 <- ggplot(data.train.mouse, aes(x = Stress, y = time)) + geom_boxplot()
+grid.arrange(plot1, plot2, ncol = 2)
+```
+
+```{r echo = F, results = 'hide'}
+fit1 <- lm(time ~ as.numeric(Stress), data = data.train.mouse)
+fit2 <- lm(time ~ as.numeric(Fatigue), data = data.train.mouse)
+summary(fit1)   # p = 0.0419, R^2 = 0.091
+summary(fit2)   # p = 0.914,  R^2 = 0.000
+```
+
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+res <- rstudent(fit1)
+crit <- qt(1 - 0.05 / (2 * nrow(data.train.mouse)), nrow(data.train.mouse) - 1)
+plot(res)
+abline(h = c(crit, -crit), col = "red")
+
+## no outliers after Bonferroni correction
+```
+
+<!-- TODO: CHECK FOR MODEL ASSUMPTIONS -->
+
+Empirically, we see that for mouse users, the larger the reported stress, the slower the response time, but there seems to be a weaker trend with reported fatigue (Figure \ref{figs:fig4}).
+Indeed, *Stress* is a significant predictor (p=0.0419), explaing about 9.1\% of the variation.
+Assigning *Stress* with 1-4 based on the stress level, we fit a model of
+$$
+    ResponseTime \sim 397.71 + 37.13 * Stress
+$$
+
+It appears that the larger one's stress, the slower they react (i.e. worse performance) (for Mouse, p=0.00851).
+However, this same trend does not seem to be the case for Fatigue (p=0.362).
+There are no outliers, determined by studentized statistics ($\alpha = 0.05$, with Bonferroi correction).
+
+## Research Question Two
+
+Now, let us a fit a larger model that includes the environmental factors, in addition to the students self-reported mental state.
+We use *AvgHoursExercise*, *AvgSleepTime*, *LastNightSleep*, *Distraction*, *NoiseLevel*, *Stress*, and *Fatigue* as predictors.
+With this model, none of the predictors are significant (p > 0.05).
+
+```{r tab2, echo=F}
+fit3 <- lm(time ~ AvgHoursExercise + AvgSleepTime + LastNightSleep + Distraction + NoiseLevel + as.numeric(Stress) + as.numeric(Fatigue), data = data.train.mouse)
+# summary(fit3)
+# anova(fit3)
+tab2 <- as.data.frame(t(vif(fit3)))
+colnames(tab2) <- c("AvgHoursExercise", "AvgSleepTime", "LastNightSleep", "Distraction", "NoiseLevel", "Stress", "Fatigue")
+knitr::kable(tab2, caption = "\\label{tabs:tab2} Variation Inflation Factors for Full Model: Mental State", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+There are low levels of collinearity for Stress and Fatigue (Table \ref{tabs:tab2}).
+Hence, we conclude that the environmental factors are not predicative one's mental state.
+
+<!-- TODO: REPEAT THE ANALYSIS FOR THE TRACKPAD CONDITION -->
+
+## Research Question Three
+
+Now, let us now consider the effect of sports and gaming activity.
+First, we shall create a combined indicator variable for the presence of sports and activity, and fit a model with additional interaction terms.
+```{r echo = F, results = 'hide'}
+data.train.mouse$ActiveGame <- (data.train.mouse$VideoGamePlay == "Daily") | (data.train.mouse$VideoGamePlay == "Several times a week")
+data.train.mouse$ActiveSports <- (data.train.mouse$SportsPlay == "Daily") | (data.train.mouse$SportsPlay == "Several times a week")
+fit4 <- lm(time ~ (as.numeric(Stress) + as.numeric(Fatigue)) * ActiveGame + (as.numeric(Stress) + as.numeric(Fatigue)) * ActiveSports, data = data.train.mouse)
+summary(fit4)
+
+fit5 <- lm(time ~ as.numeric(Stress) * ActiveGame + as.numeric(Stress) * ActiveSports, data = data.train.mouse)
+summary(fit5)
+anova(fit5)
+```
+
+Being active in either video games are significant predictors for response time activity, and they both changes the effect of stress.
+Indeed, the sequential ANCOVA test confirms this (p < 0.05).
+
+The fitted model is
+$$
+    ResponseTime \sim
+    \begin{cases}
+        520.75 + 6.608 * Stress & \text{if not active in sports or games} \\
+        732.78 - 88.29 * Stress & \text{if active in sports but not games} \\
+        217.37 + 104.05 * Stress & \text{if active in games but not sports} \\
+        429.28 + 9.153 * Stress & \text{if active in both}
+    \end{cases}
+$$
+
+<!-- TODO: REPEAT THE ANALYSIS FOR THE TRACKPAD CONDITION -->
+
+## a posteriori Validation
+
+<!-- TODO: CHECK THE RESULTS ON THE TESTING DATASET -->
+
+# Discussion and Conclusion
+
+In this study, we evaluated the effect of student's reported mental state as well as environmental conditions on their performance on an aim-trainer game, a proxy that we use for their mental acuity.
+We found that their Stress levels had a strong influence, where higher stress on average led to worse mental acuity on average, but their Fatigue level was not significant (RQ1).
+
+We did not find any association between their Stress or Fatigue levels based on their lifestyle and environmental factors (RQ2).
+This is surprising, because one might expect a distraction prone and noise-heavy environment to inhibit student performances.
+In the future, we may have to re-evaluate what it means to have a healthy and supportive environment.
+
+Most surprising was the differential effect on student gamers and athletes (RQ3).
+For those who are active in sports, they tend to improve (faster response time) when reporting high stress.
+For those who are active in games, they tend to get worse (slower reaction time) when reporting high stress.
+Further research is needed to determine if this trend is a coincidence or can be generalized.
+<!-- TODO: GIVE A HYPOTHESIS -->
