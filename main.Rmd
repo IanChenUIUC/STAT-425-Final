@@ -1,7 +1,9 @@
 ---
-title: "External Factors on Performance via Reaction Time Testing"
-author: "Ian Chen"
-date:  2025-05-01
+title: "Effects of Aim Training Performance, Lifestyle Habits, and Environmental Factors on Fatigue and Stress"
+author:
+    - Ian Chen^[Writing, Analysis, EDA, Model Building]
+    - Yan Yi Lance Du^[Reviewing and Editing, Analysis, EDA, Model Building]
+date: "`r format(Sys.time(), '%B %d, %Y')`"
 output:
     bookdown::pdf_document2:
         toc: false
@@ -11,32 +13,40 @@ output:
 # Abstract
 
 **Purpose**:
-In this study, we investigate the effect of lifestyle and mental state on students' mental acuity 
-We also characterize a set of confounders which play into one's environment.
+In this study, we investigated the effects of lifestyle, environment, and response time on students mental state.
+
 **Methods**:
-We conduct a survey for the students of an introductory statistics class at the University of Illinois, Urbana Champaign.
-Through ANOVA testing, we determine features of the environment that are significantly correlated with students' reaction time, a proxy for their performance.
+Participants were 145 students from an introductory statistics class at the University of Illinois, Urbana Champaign.
+Participants played an aim training game and completed a post-game survey that assessed personal and environmental factors that might affect aim training performance (i.e., reaction time).
+We operationalized mental state as students' stress and fatigue levels. 
+
 **Results**:
-High stress levels were associated with degraded performance on average.
-However, for atheletes, this effect was reversed, with them improving with higher stress.
-We did not find any association due to fatigue levels, nor distraction-free environments.
+We found that an increase in response time is associated with larger stress levels.
+Moreover, a distractive environment led to increased stress, but is counteracted by being active in sports.
+The only predictors associated with decreased fatigue is getting enough sleep.
+We also verified that aggregating the predictors led to an improved model.
+
 **Implications**:
-Stress is commonplace in academic settings, and so there is interest in developing systems to deal with stress.
-This study shows that we need different priorities when helping athletes and gamers.
-Moreover, there may need to be an re-evaluation towards the beneficial effects of sleep and distraction-free environments.
+Students tend to face high levels of stress and fatigue in academic settings.
+Our study implies that different interventions may be required for students to mitigate the negative effects of stress on performance.
+Indeed, future studies should consider all not only response times, but also lifestyle, environmental factors before proposing remedies for Fatigue and Stress.
 
 # Introduction
 
-It is common wisdom that a healthy lifestyle is crucial to maintain academic performance.
 In this study, we explore which indicators are significantly correlated with reaction time, a proxy for their performance.
+We study both self reported fatigue and stress levels, as well as their lifestyle habits and environment.
 
-## Investigative Questions
+## Research Questions
 
-Here, we have three primary research questions:
+Here, we have three primary research questions (RQ):
 
-1. Does impaired mental state affect students' performance on aim trainers?
+1. Does aim training performance correlate to impaired mental state?
 2. Are there environmental factors consistent with impared mental state?
-3. Does the above change when taking into account games or sport activity?
+3. Are there lifestyle factors consistent with impared mental state?
+
+We hypothesize that worse performance on aim trainers would lead to more fatigue and stress levels.
+We expect poor environments to affect both stress and fatigue equally.
+We think that a poor lifestyle would lead to increased fatigue, and may not affect stress.
 
 # Materials and Methods
 
@@ -48,13 +58,15 @@ All students submitted their scores for their first three attempts.
 In this study, we will take their median response.
 
 First, we only consider datapoints that have Stable Wifi (so we remove 2 points).
-Nexxt, to control for disparities in technology, we pre-filter our dataset to only include the input devices for *Mouse* and *Trackpad*.
 Moreover, to make sure we are not overfitting, we partition into 90% training and 10% testing.
 Fitting models on the training set, we verify *a posteriori* whether the results are consistent on the testing set.
 Finally, we conduct a differential study (fitting different models) on each category.
 
-```{r echo = F, results='hide', error=F, warning=F, message=F}
+# Exploratory Data Analysis
+
+```{r Libraries, echo = F, results='hide', error=F, warning=F, message=F}
 library(knitr)
+library(lmtest)
 library(kableExtra)
 library(tidyverse)
 library(dplyr)
@@ -66,200 +78,411 @@ library(splines)
 library(pls)
 library(glmnet)
 library(faraway)
+library(psych)
+library(ggcorrplot)
+library(Metrics)
 ```
 
-```{r echo = F, results='hide'}
+```{r Preprocessing1, echo = F, results = 'hide'}
 survey <- read.csv("Survey.csv")
 
-# partitioning the dataset, as described in Sec. Materials and Methods
-data <- survey[survey$InputDevice %in% c("Mouse", "Trackpad"),]
+# filtering only Stable Wifi, on the Mouse and Trackpad conditions
+data <- survey[survey$InputDevice %in% c("Mouse", "Trackpad"), ]
 data <- data[data$WiFi == "Stable", ]
-data$time <- apply(data[, c("First", "Second", "Third")], 1, median)
-data.test <- data[seq(10, nrow(data), by = 10),]
-data.train <- data[-seq(10, nrow(data), by = 10), ]
-data.train.mouse <- data.train[data.train$InputDevice == "Mouse", ]
-data.train.track <- data.train[data.train$InputDevice == "Trackpad", ]
-data.test.mouse <- data.test[data.test$InputDevice == "Mouse", ]
-data.test.track <- data.test[data.test$InputDevice == "Trackpad", ]
+
+# processing the response variable to report Median Time
+data$Time <- apply(data[, c("First", "Second", "Third")], 1, median)
+
+# Organizing the levels as increasing severity
+data$Stress <- factor(data$Stress, levels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+data$Fatigue <- factor(data$Fatigue, levels = c("Not fatigued at all", "Slightly Fatigued", "Moderately fatigued", "Very fatigued", "Extremely fatigued"), labels = c("Very Low", "Low", "Moderate", "High", "Very High"))
+
+# Organizing it in ascending frequency
+data$SportsPlay <- factor(data$SportsPlay, levels = c("Daily", "Several times a week", "Once a week", "Several times a month", "Rarely", "Never"))
+data$VideoGamePlay <- factor(data$VideoGamePlay, levels = c("Daily", "Several times a week", "Once a week", "Several times a month", "Rarely", "Never"))
+
+# Making them numeric
+data$StressN <- as.numeric(data$Stress)
+data$FatigueN <- as.numeric(data$Fatigue)
+data$SportsPlayN <- as.numeric(data$SportsPlay)
+data$VideoGamePlayN <- as.numeric(data$VideoGamePlay)
+
+# Creating binary variable "High" and "Low"
+data$ActiveSports <- data$SportsPlayN < 3
+data$ActiveGame <- data$VideoGamePlayN < 3
+
+# Creating binary variable for mouse or not
+data$Mouse <- data$InputDevice == "Mouse"
 ```
 
-```{r tab1, echo = F}
-tab1 <- matrix(c(nrow(data.train.mouse), nrow(data.train.track), nrow(data.train), nrow(data.test.mouse), nrow(data.test.track), nrow(data.test)), nrow = 2, byrow = TRUE)
-rownames(tab1) <- c("Training", "Testing")
-colnames(tab1) <- c("Mouse", "Trackpad", "Total")
-knitr::kable(tab1, caption = "\\label{tabs:tab1} Dataset Properties", booktabs = TRUE) %>%
+```{r Preprocessing2, echo = F, results = 'hide'}
+
+# Partitioning into test and training datasets
+data.test <- data[seq(10, nrow(data), by = 10), ]
+data.train <- data[-seq(10, nrow(data), by = 10), ]
+```
+
+```{r tab1, echo = F, results = 'asis'}
+
+data.train.mouse <- data.train[data.train$InputDevice == "Mouse", ]
+data.train.track <- data.train[data.train$InputDevice == "Trackpad", ]
+
+# Stress and Fatigue, on Mouse
+t1a <- data.train.mouse %>% count(Fatigue)
+t1b <- data.train.mouse %>% count(Stress)
+t1 <- t1a %>% inner_join(t1b, by = c("Fatigue" = "Stress"))
+colnames(t1) <- c("Level", "Fatigue", "Stress")
+t1 <- t1 %>% add_row(Level = "Total", Fatigue = nrow(data.train.mouse), Stress = nrow(data.train.mouse))
+
+# Stress and Fatigue, on Track
+t3a <- data.train.track %>% count(Fatigue)
+t3b <- data.train.track %>% count(Stress)
+t3 <- t3a %>% inner_join(t3b, by = c("Fatigue" = "Stress"))
+colnames(t3) <- c("Level", "Fatigue", "Stress")
+t3 <- t3 %>% add_row(Level = "Total", Fatigue = nrow(data.train.track), Stress = nrow(data.train.track))
+
+T1 <- t1 %>% inner_join(t3, by = "Level")
+colnames(T1) <- c("Level", "FatigueMouse", "StressMouse", "FatigueTrack", "StressTrack")
+knitr::kable(T1, align = "c", caption = "\\label{tabs:tab1}Fatigue and Stress counts on Training Dataset", booktabs = TRUE) %>%
     kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
-<!-- TODO: Add the columns for ActiveSports and ActiveGames, done below into this figure -->
+```{r tab2, echo = F, results = 'asis'}
 
-After filtering, we have 118 datapoints in the training and 13 entries in the testing set, with marginally more datapoints for the trackpad condition (Table \ref{tab:tab1}).
+# Game and Sports, on Mouse
+t2a <- data.train.mouse %>% count(VideoGamePlay)
+t2b <- data.train.mouse %>% count(SportsPlay)
+t2 <- t2a %>% inner_join(t2b, by = c("VideoGamePlay" = "SportsPlay"))
+colnames(t2) <- c("Level", "VideoGamePlay", "SportsPlay")
+t2 <- t2 %>% add_row(Level = "Total", VideoGamePlay = nrow(data.train.mouse), SportsPlay = nrow(data.train.mouse))
 
-# Exploratory Data Analysis
+# Game and Sports, on Track
+t4a <- data.train.track %>% count(VideoGamePlay)
+t4b <- data.train.track %>% count(SportsPlay)
+t4 <- t4a %>% inner_join(t4b, by = c("VideoGamePlay" = "SportsPlay"))
+colnames(t4) <- c("Level", "VideoGamePlay", "SportsPlay")
+t4 <- t4 %>% add_row(Level = "Total", VideoGamePlay = nrow(data.train.track), SportsPlay = nrow(data.train.track))
 
-```{r fig1, echo = F, fig.cap="\\label{figs:fig1} Distribution of Response Variable on the Training Dataset. The x-axis describes the average response time in milliseconds. The y-axis describes the number of results. Left: Using the mouse input device. Right: Using the trackpad input device."}
-par(mfrow = c(1, 2), mar = c(3, 3, 2, 1))
-hist(data.train.mouse$time, xlab = "Response Time (ms)", ylab = "Count", main = "")
-hist(data.train.track$time, xlab = "Response Time (ms)", ylab = "Count", main = "")
+T2 <- t2 %>% inner_join(t4, by = "Level")
+colnames(T2) <- c("Level", "GameMouse", "SportsMouse", "GameTrack", "SportsTrack")
+
+knitr::kable(T2, align = "c", caption = "\\label{tabs:tab2}Game and Sports counts on Training Dataset", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
-```{r fig2, echo = F, fig.cap="\\label{figs:fig2} Frequency of Stress and Fatigue on the Training Dataset. The x-axis describes the amount of stress or fatigue, in ascending levels. The y-axis describes the number of results. Top: Using the mouse input device. Bot: Using the trackpad input device. Left: Stress. Right: Fatigue."}
-
-# Organizing it in ascending frequency
-data.train.mouse$Stress <- factor(data.train.mouse$Stress, levels = c("Very Low", "Low", "Moderate", "High", "Very High"))
-data.train.mouse$Fatigue <- factor(data.train.mouse$Fatigue, levels = c("Not fatigued at all", "Slightly Fatigued", "Moderately fatigued", "Very fatigued", "Extremely fatigued"), labels = c("Very Low", "Low", "Moderate", "High", "Very High"))
-data.train.track$Stress <- factor(data.train.track$Stress, levels = c("Very Low", "Low", "Moderate", "High", "Very High"))
-data.train.track$Fatigue <- factor(data.train.track$Fatigue, levels = c("Not fatigued at all", "Slightly Fatigued", "Moderately fatigued", "Very fatigued", "Extremely fatigued"), labels = c("Very Low", "Low", "Moderate", "High", "Very High"))
-
-par(mfrow = c(2, 2), mar = c(1, 4, 1, 1))
-barplot(table(data.train.mouse$Stress), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.mouse$Fatigue), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.track$Stress), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.track$Fatigue), xlab = "Count", main = "", las = 2, horiz = TRUE)
-```
-
-```{r fig3, echo = F, fig.cap="\\label{figs:fig3} Frequency of Sports and VideoGame Activity on the Training Dataset. The x-axis describes the frequency of performing the activity, in ascending frequency. The y-axis describes the number of results. Top: Using the mouse input device. Bot: Using the trackpad input device. Left: Playing any sort of sports. Right: Playing any kind of video games."}
-# Organizing it in ascending frequency
-data.train.mouse$SportsPlay <- factor(data.train.mouse$SportsPlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
-data.train.mouse$VideoGamePlay <- factor(data.train.mouse$VideoGamePlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
-data.train.track$SportsPlay <- factor(data.train.track$SportsPlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
-data.train.track$VideoGamePlay <- factor(data.train.track$VideoGamePlay, levels = c("Daily", "Several times a week", "Several times a month", "Rarely", "Never"))
-
-par(mfrow = c(2, 2), mar = c(1, 4, 2, 1))
-barplot(table(data.train.mouse$SportsPlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.mouse$VideoGamePlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.track$SportsPlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
-barplot(table(data.train.track$VideoGamePlay), xlab = "Count", main = "", las = 2, horiz = TRUE)
-
-# Same results, but in table form
-# table1a <- data.train %>% count(SportsPlay)
-# table1b <- data.train %>% count(VideoGamePlay)
-# gridExtra::grid.arrange(grobs = list(gridExtra::tableGrob(table1a), gridExtra::tableGrob(table1b)), ncol = 2)
-```
-
-We see that the response variable is roughly normally distributed across all conditions (Figure \ref{figs:fig1}, Figure \ref{figs:fig2}).
-This is similar for the video game activity, except for the *Mouse* users that seem to play *Video* games more often than other categories (Figure \ref{figs:fig3}).
-
-Since there is only one datapoint for high stress and fatigue, we remove them from our study.
+We see that there are very few datapoints for the *Very High* observations in our training dataset, and hence we remove these from the dataset (Table \ref{tabs:tab1}).
 ```{r, echo = F}
-data.train.mouse <- data.train.mouse[data.train.mouse$Fatigue != "Very High", ]
-data.train.track <- data.train.track[data.train.track$Fatigue != "Very High", ]
-data.train.mouse <- data.train.mouse[data.train.mouse$Stress != "Very High", ]
-data.train.track <- data.train.track[data.train.track$Stress != "Very High", ]
-data.train.mouse$Stress <- factor(data.train.mouse$Stress, levels = c("Very Low", "Low", "Moderate", "High"))
-data.train.mouse$Fatigue <- factor(data.train.mouse$Fatigue, levels = c("Very Low", "Low", "Moderate", "High"))
-data.train.track$Stress <- factor(data.train.track$Stress, levels = c("Very Low", "Low", "Moderate", "High"))
-data.train.track$Fatigue <- factor(data.train.track$Fatigue, levels = c("Very Low", "Low", "Moderate", "High"))
+data.train <- data.train[data.train$Fatigue != "Very High", ]
+data.train <- data.train[data.train$Stress != "Very High", ]
+data.test <- data.test[data.test$Fatigue != "Very High", ]
+data.test <- data.test[data.test$Stress != "Very High", ]
 ```
 
-# Model Building
+```{r fig1, echo = F, fig.cap="\\label{figs:fig1} Distribution of Response Variable on the Training Dataset. The x-axis describes the median response time in milliseconds. The y-axis describes the number of results."}
+hist(data.train$Time, xlab = "Response Time (ms)", ylab = "Count", main = "")
+```
 
-## Research Question One
+We see that the response variable is roughly normally distributed across both mouse and trackpad groups (Figure \ref{figs:fig1}).
 
-We investigate the effect of one's mental state on their performance, for the *Mouse* condition.
+```{r tab3, echo = F}
+df <- data.train[,c("Time", "StressN", "FatigueN", "NoiseLevel", "AvgHoursExercise", "AvgSleepTime", "LastNightSleep")]
+tab3 <- round(as.matrix(describe(df))[, -c(1, 2)], 2)
+knitr::kable(tab3, caption = "\\label{tabs:tab3} Descriptive Statistics", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
 
-```{r fig4, echo = F, fig.cap="\\label{figs:fig4} Median response time based on Fatigue and Stress levels. The y-axis shows the median response time across three trials. Left: Increasing Fatigue. Right: Increasing Stress."}
-plot1 <- ggplot(data.train.mouse, aes(x = Fatigue, y = time)) + geom_boxplot()
-plot2 <- ggplot(data.train.mouse, aes(x = Stress, y = time)) + geom_boxplot()
+```{r fig2, echo = F, fig.cap="\\label{figs:fig2} Correlation Matrix"}
+df <- data.train[, c("Time", "StressN", "FatigueN", "NoiseLevel", "AvgHoursExercise", "AvgSleepTime", "LastNightSleep")]
+cor_heatmap <- cor(df)
+ggcorrplot(cor_heatmap, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 1.4,
+           colors = c("red", "white", "blue"),
+           title = "Correlation Heatmap",
+           ggtheme = theme_minimal())
+```
+
+# Research Question One
+
+We investigate separately on the Mouse and Trackpad users.
+
+```{r, echo = F}
+data.train.mouse <- data.train[data.train$InputDevice == "Mouse", ]
+data.train.track <- data.train[data.train$InputDevice == "Trackpad", ]
+```
+
+## Mouse
+
+```{r fig3, fig.height = 3, echo = F, fig.cap="\\label{figs:fig3} Median response time based on Fatigue and Stress levels. The y-axis shows the median response time across three trials. Left: Increasing Fatigue. Right: Increasing Stress."}
+plot1 <- ggplot(data.train.mouse, aes(y = Fatigue, x = Time)) + geom_boxplot()
+plot2 <- ggplot(data.train.mouse, aes(y = Stress, x = Time)) + geom_boxplot()
 grid.arrange(plot1, plot2, ncol = 2)
 ```
 
 ```{r echo = F, results = 'hide'}
-fit1 <- lm(time ~ as.numeric(Stress), data = data.train.mouse)
-fit2 <- lm(time ~ as.numeric(Fatigue), data = data.train.mouse)
-summary(fit1)   # p = 0.0419, R^2 = 0.091
-summary(fit2)   # p = 0.914,  R^2 = 0.000
+fit1 <- lm(StressN ~ Time, data = data.train.mouse)
+fit2 <- lm(FatigueN ~ Time, data = data.train.mouse)
+summary(fit1)   # p = 0.0342, R^2 = 0.0979
+summary(fit2)   # p = 0.992,  R^2 = 0.0000
 ```
 
 ```{r echo = F, results = 'hide', fig.show = 'hide'}
+## no outliers after Bonferroni correction
+
 res <- rstudent(fit1)
 crit <- qt(1 - 0.05 / (2 * nrow(data.train.mouse)), nrow(data.train.mouse) - 1)
 plot(res)
 abline(h = c(crit, -crit), col = "red")
-
-## no outliers after Bonferroni correction
 ```
 
-<!-- TODO: CHECK FOR MODEL ASSUMPTIONS -->
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+par(mfrow = c(2, 2))
+plot(fit1, which = 1)  # Residuals vs Fitted
+plot(fit1, which = 2)  # Q-Q plot
+plot(fit1, which = 3)  # Scale-Location plot
+plot(fit1, which = 4)  # Residuals vs Leverage
 
-Empirically, we see that for mouse users, the larger the reported stress, the slower the response time, but there seems to be a weaker trend with reported fatigue (Figure \ref{figs:fig4}).
-Indeed, *Stress* is a significant predictor (p=0.0419), explaing about 9.1\% of the variation.
-Assigning *Stress* with 1-4 based on the stress level, we fit a model of
-$$
-    ResponseTime \sim 397.71 + 37.13 * Stress
-$$
+# Perform Shapiro-Wilk test
+shapiro.test(resid(fit1)) # normality assumption seems violated
+shapiro.test(resid(fit2)) # normality assumption seems violated
 
-It appears that the larger one's stress, the slower they react (i.e. worse performance) (for Mouse, p=0.00851).
-However, this same trend does not seem to be the case for Fatigue (p=0.362).
-There are no outliers, determined by studentized statistics ($\alpha = 0.05$, with Bonferroi correction).
-
-## Research Question Two
-
-Now, let us a fit a larger model that includes the environmental factors, in addition to the students self-reported mental state.
-We use *AvgHoursExercise*, *AvgSleepTime*, *LastNightSleep*, *Distraction*, *NoiseLevel*, *Stress*, and *Fatigue* as predictors.
-With this model, none of the predictors are significant (p > 0.05).
-
-```{r tab2, echo=F}
-fit3 <- lm(time ~ AvgHoursExercise + AvgSleepTime + LastNightSleep + Distraction + NoiseLevel + as.numeric(Stress) + as.numeric(Fatigue), data = data.train.mouse)
-# summary(fit3)
-# anova(fit3)
-tab2 <- as.data.frame(t(vif(fit3)))
-colnames(tab2) <- c("AvgHoursExercise", "AvgSleepTime", "LastNightSleep", "Distraction", "NoiseLevel", "Stress", "Fatigue")
-knitr::kable(tab2, caption = "\\label{tabs:tab2} Variation Inflation Factors for Full Model: Mental State", booktabs = TRUE) %>%
-    kableExtra::kable_styling(latex_options = "hold_position")
+# Check for independence
+bptest(fit1)
+bptest(fit2)
 ```
 
-There are low levels of collinearity for Stress and Fatigue (Table \ref{tabs:tab2}).
-Hence, we conclude that the environmental factors are not predicative one's mental state.
+Empirically, we see that for mouse users, the higher the aim training time level, the larger the stress.
+Indeed, an increase of 200ms would lead to half a unit increase of stress level.
+However, there seems to be no no clear trend for fatigue (Figure \ref{figs:fig3}).
 
-<!-- TODO: REPEAT THE ANALYSIS FOR THE TRACKPAD CONDITION -->
+There are no outliers, determined by studentized statistics ($\alpha = 0.05$, with Bonferroni correction).
+We also tested for normality using the Shapiro-Wilks test. 
+The residuals for both stress and fatigue SLR models seems non-normal (p < 0.05).
+We tested for homoscedasticity using the B-P test.
+The constant variance assumption held for both stress (p = 0.77) and fatigue (p = 0.74) SLR models.
+All Cook's Distances were less than 1, so there are no highly influential points. 
 
-## Research Question Three
+## Trackpad
 
-Now, let us now consider the effect of sports and gaming activity.
-First, we shall create a combined indicator variable for the presence of sports and activity, and fit a model with additional interaction terms.
+```{r fig4, fig.height = 3, echo = F, fig.cap="\\label{figs:fig4} Median response time based on Fatigue and Stress levels for Trackpad. The y-axis shows the median response time across three trials. Left: Increasing Fatigue. Right: Increasing Stress."}
+plot1 <- ggplot(data.train.track, aes(y = Fatigue, x = Time)) + geom_boxplot()
+plot2 <- ggplot(data.train.track, aes(y = Stress, x = Time)) + geom_boxplot()
+grid.arrange(plot1, plot2, ncol = 2)
+```
+
 ```{r echo = F, results = 'hide'}
-data.train.mouse$ActiveGame <- (data.train.mouse$VideoGamePlay == "Daily") | (data.train.mouse$VideoGamePlay == "Several times a week")
-data.train.mouse$ActiveSports <- (data.train.mouse$SportsPlay == "Daily") | (data.train.mouse$SportsPlay == "Several times a week")
-fit4 <- lm(time ~ (as.numeric(Stress) + as.numeric(Fatigue)) * ActiveGame + (as.numeric(Stress) + as.numeric(Fatigue)) * ActiveSports, data = data.train.mouse)
-summary(fit4)
-
-fit5 <- lm(time ~ as.numeric(Stress) * ActiveGame + as.numeric(Stress) * ActiveSports, data = data.train.mouse)
-summary(fit5)
-anova(fit5)
+fit1 <- lm(StressN ~ Time, data = data.train.track)
+fit2 <- lm(FatigueN ~ Time, data = data.train.track)
+summary(fit1)   # p = 0.0342, R^2 = 0.0979
+summary(fit2)   # p = 0.992,  R^2 = 0.0000
 ```
 
-Being active in either video games are significant predictors for response time activity, and they both changes the effect of stress.
-Indeed, the sequential ANCOVA test confirms this (p < 0.05).
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+## no outliers after Bonferroni correction
 
-The fitted model is
+res <- rstudent(fit1)
+crit <- qt(1 - 0.05 / (2 * nrow(data.train.track)), nrow(data.train.track) - 1)
+plot(res)
+abline(h = c(crit, -crit), col = "red")
+```
+
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+par(mfrow = c(2, 2))
+plot(fit1, which = 1)  # Residuals vs Fitted
+plot(fit1, which = 2)  # Q-Q plot
+plot(fit1, which = 3)  # Scale-Location plot
+plot(fit1, which = 4)  # Residuals vs Leverage
+
+# Perform Shapiro-Wilk test
+shapiro.test(resid(fit1)) # normality assumption seems violated
+shapiro.test(resid(fit2)) # normality assumption seems violated
+
+# Check for independence
+bptest(fit1)
+bptest(fit2)
+```
+
+On the Trackpad condition, the trend is a lot less clear (Figure \ref{figs:fig4}).
+Indeed, neither *Stress* nor *Fatigue* are significant predictors now (p > 0.05).
+
+There are no outliers, determined by studentized statistics ($\alpha = 0.05$, with Bonferroni correction).
+We also tested for normality using the Shapiro-Wilks test. 
+The residuals for both stress and fatigue SLR models seems normal (p > 0.05).
+We tested for homoscedasticity using the B-P test.
+The constant variance assumption held for both stress (p = 0.64) and fatigue (p = 0.14) SLR models.
+All Cook's Distances were less than 1, so there are no highly influential points. 
+
+# Research Question Two
+
+Now, we try to determine if there are correlations between Stress and Fatigue, based on environmental factors such as *Distraction*, *NoiseLevel*.
+
+```{r, echo = F, results = 'hide'}
+fit3 <- lm(StressN ~ Distraction + NoiseLevel, data = data.train)
+summary(fit3)
+vif(fit3)
+```
+
+```{r, echo = F, results = 'hide'}
+fit4 <- lm(FatigueN ~ Distraction + NoiseLevel, data = data.train)
+summary(fit4)
+vif(fit4)
+```
+
+Being in a highly distractive environment led to an increase in stress (p = 0.0126).
+Environmental factors did not affect one's fatigue (p > 0.05).
+
+# Research Question Three
+
+Now, let us now consider if there are correlations between Stress and Fatigue based on lifestyle habits, including sleep, exercise, sports, and gaming activity.
+
+```{r, echo = F, results = 'hide'}
+fit5 <- lm(StressN ~ LastNightSleep + AvgHoursExercise + ActiveSports + ActiveGame, data = data.train)
+summary(fit5)
+vif(fit5)
+```
+
+```{r, echo = F, results = 'hide'}
+fit6 <- lm(FatigueN ~ LastNightSleep + AvgHoursExercise + ActiveSports + ActiveGame, data = data.train)
+summary(fit6)
+vif(fit6)
+```
+
+First, being active in sports decreases stress levels by half a unit (p = 0.084).
+Indeed, this is the largest drop in stress levels out of any predictor.
+
+Getting more sleep is also strongly related to decreases in fatigue (p = 0.0075).
+
+# Model Building
+
+We have studied three classes of predictors: aim training response time, lifestyle (Sports and Gaming), as well as environmental (Distraction).
+It is clear that fatigue is only related to lifestyle habits, but it is unknown which of the classes of predictors are most important for stress.
+Here, we synthesize the results and perform model comparison.
+
+```{r echo = F, results = 'hide'}
+fit <- lm(StressN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + AvgHoursExercise, data = data.train)
+summary(fit)
+anova(fit)
+```
+
+```{r echo = F, results = 'hide'}
+stepwise_model <- step(fit, direction = "backward", k = 2)
+
+fitStress <- lm(StressN ~ ActiveSports + Distraction, data = data.train)
+summary(fitStress)
+```
+
+Running backwards variable selection using AIC, we find that we should use the predictors ActiveSports and Distraction.
+Our final model, using predictors ActiveSports and Distraction, is
 $$
-    ResponseTime \sim
+    Stress \sim
     \begin{cases}
-        520.75 + 6.608 * Stress & \text{if not active in sports or games} \\
-        732.78 - 88.29 * Stress & \text{if active in sports but not games} \\
-        217.37 + 104.05 * Stress & \text{if active in games but not sports} \\
-        429.28 + 9.153 * Stress & \text{if active in both}
+        2.463 & \text{if not active in sports and not distractive environment} \\
+        2.018 & \text{if active in sports and not distractive environment} \\
+        3.085 & \text{if not active in sports but distractive environment} \\
+        2.640 & \text{if active in sports but distractive environment}
     \end{cases}
 $$
 
-<!-- TODO: REPEAT THE ANALYSIS FOR THE TRACKPAD CONDITION -->
+```{r echo = F, results = 'hide'}
+fit <- lm(FatigueN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + AvgHoursExercise, data = data.train)
+summary(fit)
+anova(fit)
+```
+
+```{r echo = F, results = 'hide'}
+stepwise_model <- step(fit, direction = "backward", k = 2)
+
+fitFatigue <- lm(FatigueN ~ LastNightSleep + Distraction, data = data.train)
+summary(fitFatigue)
+```
+
+Running backwards variable selection using AIC, we find that we should use the predictors ActiveSports and Distraction to predict Stress.
+Our final model, using predictors ActiveSports and Distraction, is
+$$
+    Stress \sim
+    \begin{cases}
+        2.463 & \text{if not active in sports and not distractive environment} \\
+        2.018 & \text{if active in sports and not distractive environment} \\
+        3.085 & \text{if not active in sports but distractive environment} \\
+        2.640 & \text{if active in sports but distractive environment}
+    \end{cases}
+$$
+
+Running backwards variable selection using AIC, we find that we should use the predictors LastNightSleep and Distraction to predict Fatigue. 
+Our final model, using predictors LastNightSleep and Distraction, is
+$$
+    Fatigue \sim
+    \begin{cases}
+        3.160 - 0.118 * LastNightSleep & \text{If no distractions} \\
+        3.485 - 0.118 * LastNightSleep & \text{if distractions} \\
+    \end{cases}
+$$
+
+## Model Comparison
+
+```{r echo = F, results = 'asis'}
+fit1 <- lm(StressN ~ Time * Mouse, data = data.train)
+fit2 <- lm(StressN ~ Distraction, data = data.train)
+fit3 <- lm(StressN ~ ActiveSports, data = data.train)
+
+aic <- t(as.data.frame(c(AIC(fitStress), AIC(fit1), AIC(fit2), AIC(fit3))))
+rownames(aic) <- c("AIC")
+colnames(aic) <- c("All", "AimTraining", "Environment", "Lifestyle")
+knitr::kable(aic, align = "c", caption = "\\label{tabs:tab4}AIC scores for different Stress models", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+```{r echo = F, results = 'asis'}
+fit1 <- lm(FatigueN ~ 1, data = data.train)
+fit2 <- lm(FatigueN ~ 1, data = data.train)
+fit3 <- lm(FatigueN ~ LastNightSleep, data = data.train)
+
+aic <- t(as.data.frame(c(AIC(fitFatigue), AIC(fit1), AIC(fit2), AIC(fit3))))
+rownames(aic) <- c("AIC")
+colnames(aic) <- c("All", "AimTraining", "Environment", "Lifestyle")
+knitr::kable(aic, align = "c", caption = "\\label{tabs:tab5}AIC scores for different Fatigue models", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+We can compare this aggregated model to the ones using predictors from each class individually.
+Indeed, the aggregated model has the lowest AIC score for both the Stress and Fatigue models, and is the best (Tables \ref{tabs:tab4}, \ref{tabs:tab5}).
 
 ## a posteriori Validation
 
-<!-- TODO: CHECK THE RESULTS ON THE TESTING DATASET -->
+```{r echo = F, results = 'asis'}
+predStress <- predict(fitStress, newdata = data.train)
+predFatigue <- predict(fitFatigue, newdata = data.train)
+e1 <- rmse(actual = data.train$StressN, predicted = predStress)
+e2 <- rmse(actual = data.train$StressN, predicted = predFatigue)
+
+predStress <- predict(fitStress, newdata = data.test)
+predFatigue <- predict(fitFatigue, newdata = data.test)
+e3 <- rmse(actual = data.test$StressN, predicted = predStress)
+e4 <- rmse(actual = data.test$StressN, predicted = predFatigue)
+
+errors <- t(as.data.frame(c(e1, e2, e3, e4)))
+rownames(errors) <- c("RMSE")
+colnames(errors) <- c("TrainStress", "TrainFatigue", "TestStress", "TestFatigue")
+knitr::kable(errors, align = "c", caption = "\\label{tabs:tab6}RMSE between Training and Testing", booktabs = TRUE) %>%
+    kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+We evaluate the root mean squared error (RMSE) of the stress and fatigue models on the training and testing dataset.
+We do not any inflated errors on the testing set, so we are probably not overfitting (Table \ref{tabs:tab6}).
 
 # Discussion and Conclusion
 
-In this study, we evaluated the effect of student's reported mental state as well as environmental conditions on their performance on an aim-trainer game, a proxy that we use for their mental acuity.
-We found that their Stress levels had a strong influence, where higher stress on average led to worse mental acuity on average, but their Fatigue level was not significant (RQ1).
+Trying to predict stress and fatigue is difficult, and our models only explained around 10% of the variation for each.
+However, we did gain valuable insights into which predictors are significant.
 
-We did not find any association between their Stress or Fatigue levels based on their lifestyle and environmental factors (RQ2).
-This is surprising, because one might expect a distraction prone and noise-heavy environment to inhibit student performances.
-In the future, we may have to re-evaluate what it means to have a healthy and supportive environment.
+First, we determined that on trackpad, the aim training response time was too varied and there were no clear trends.
+For future studies using aim training time as a predictor for mental state, we recommend to require mouse data in order to reduce the variation.
+Indeed, for mouse users, we were able to say that the faster response times were correlated with decreased stress.
 
-Most surprising was the differential effect on student gamers and athletes (RQ3).
-For those who are active in sports, they tend to improve (faster response time) when reporting high stress.
-For those who are active in games, they tend to get worse (slower reaction time) when reporting high stress.
-Further research is needed to determine if this trend is a coincidence or can be generalized.
-<!-- TODO: GIVE A HYPOTHESIS -->
+It was surprising that the level of noise in the environment was insignificant towards both stress and fatigue, since we expected more fatigue with noisy environments.
+We verified that a highly distractive environment led to higher stress.
+Unsurprisingly, fatigue levels are strongly correlated with one's lifestyle, namely their sports activity and sleep.
+
+Finally, we verified that using all three classes of predictors lead to an improved model for both Fatigue and Stress.
+Indeed, future studies should consider all not only response times, but also lifestyle, environmental factors before proposing remedies for Fatigue and Stress.
