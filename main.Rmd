@@ -1,8 +1,7 @@
 ---
 title: "Effects of Aim Training Performance, Lifestyle Habits, and Environmental Factors on Fatigue and Stress"
 author:
-    - Ian Chen^[Writing, Analysis, EDA, Model Building]
-    - Yan Yi Lance Du^[Reviewing and Editing, Analysis, EDA, Model Building]
+    - Ian Chen^[Review of early drafts of the report was given by Yan Yi Lance Du]
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 output:
     bookdown::pdf_document2:
@@ -23,7 +22,7 @@ We operationalized mental state as students' stress and fatigue levels.
 **Results**:
 We found that an increase in response time is associated with larger stress levels.
 Moreover, a distractive environment led to increased stress, but is counteracted by being active in sports.
-The only predictors associated with decreased fatigue is getting enough sleep.
+The only predictors associated with decreased fatigue is getting enough sleep and exercise.
 We also verified that aggregating the predictors led to an improved model.
 
 **Implications**:
@@ -113,6 +112,9 @@ data$ActiveGame <- data$VideoGamePlayN < 3
 
 # Creating binary variable for mouse or not
 data$Mouse <- data$InputDevice == "Mouse"
+
+# Correcting skewness in Exercise
+data$LogExercise <- log(1 + data$AvgHoursExercise)
 ```
 
 ```{r Preprocessing2, echo = F, results = 'hide'}
@@ -178,7 +180,7 @@ data.test <- data.test[data.test$Fatigue != "Very High", ]
 data.test <- data.test[data.test$Stress != "Very High", ]
 ```
 
-```{r fig1, echo = F, fig.cap="\\label{figs:fig1} Distribution of Response Variable on the Training Dataset. The x-axis describes the median response time in milliseconds. The y-axis describes the number of results."}
+```{r fig1, fig.height = 3, echo = F, fig.cap="\\label{figs:fig1} Distribution of Response Variable on the Training Dataset. The x-axis describes the median response time in milliseconds. The y-axis describes the number of results."}
 hist(data.train$Time, xlab = "Response Time (ms)", ylab = "Count", main = "")
 ```
 
@@ -191,8 +193,16 @@ knitr::kable(tab3, caption = "\\label{tabs:tab3} Descriptive Statistics", bookta
     kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
-```{r fig2, echo = F, fig.cap="\\label{figs:fig2} Correlation Matrix"}
-df <- data.train[, c("Time", "StressN", "FatigueN", "NoiseLevel", "AvgHoursExercise", "AvgSleepTime", "LastNightSleep")]
+```{r fig2a, fig.height = 3, echo = F, fig.cap="\\label{figs:fig2a} Transformed AvgHoursExercise"}
+hist(data.train$LogExercise, xlab = "log(1 + AvgHoursExercise)", ylab = "Count", main = "")
+```
+
+From this table, we see that AvgHoursExercise is the only attribute that is heavily skewed (Table \ref{tabs:tab3}).
+We try to correct this by applying a log transformation.
+Indeed, after this, we correct most of the skew (Figure \ref{figs:fig2a}).
+
+```{r fig2, fig.height = 3, echo = F, fig.cap="\\label{figs:fig2} Correlation Matrix"}
+df <- data.train[, c("Time", "StressN", "FatigueN", "NoiseLevel", "LogExercise", "AvgSleepTime", "LastNightSleep")]
 cor_heatmap <- cor(df)
 ggcorrplot(cor_heatmap, 
            type = "lower", 
@@ -202,6 +212,10 @@ ggcorrplot(cor_heatmap,
            title = "Correlation Heatmap",
            ggtheme = theme_minimal())
 ```
+
+Now, looking at the correlation heatmap, we see that there is lots of positive correlation between AvgSleep and LastNightSleep (Figure \ref{figs:fig2}).
+Moreover, we see correlation between Fatigue and Stress, and also a negative correlation between LastNightSleep and Fatigue.
+In general, there is little correlations within our data.
 
 # Research Question One
 
@@ -313,6 +327,9 @@ We tested for homoscedasticity using the B-P test.
 The constant variance assumption held for both stress (p = 0.64) and fatigue (p = 0.14) SLR models.
 All Cook's Distances were less than 1, so there are no highly influential points. 
 
+Trying several transformations did not improve the normality residuals assumption.
+We leave it as is, since MLR is robust to violations of this.
+
 # Research Question Two
 
 Now, we try to determine if there are correlations between Stress and Fatigue, based on environmental factors such as *Distraction*, *NoiseLevel*.
@@ -331,19 +348,20 @@ vif(fit4)
 
 Being in a highly distractive environment led to an increase in stress (p = 0.0126).
 Environmental factors did not affect one's fatigue (p > 0.05).
+There are no indicators nor evidence of any collinearity; in particular, all the VIF scores are low.
 
 # Research Question Three
 
 Now, let us now consider if there are correlations between Stress and Fatigue based on lifestyle habits, including sleep, exercise, sports, and gaming activity.
 
 ```{r, echo = F, results = 'hide'}
-fit5 <- lm(StressN ~ LastNightSleep + AvgHoursExercise + ActiveSports + ActiveGame, data = data.train)
+fit5 <- lm(StressN ~ LastNightSleep + LogExercise + ActiveSports + ActiveGame, data = data.train)
 summary(fit5)
 vif(fit5)
 ```
 
 ```{r, echo = F, results = 'hide'}
-fit6 <- lm(FatigueN ~ LastNightSleep + AvgHoursExercise + ActiveSports + ActiveGame, data = data.train)
+fit6 <- lm(FatigueN ~ LastNightSleep + LogExercise + ActiveSports + ActiveGame, data = data.train)
 summary(fit6)
 vif(fit6)
 ```
@@ -351,7 +369,10 @@ vif(fit6)
 First, being active in sports decreases stress levels by half a unit (p = 0.084).
 Indeed, this is the largest drop in stress levels out of any predictor.
 
-Getting more sleep is also strongly related to decreases in fatigue (p = 0.0075).
+Getting more sleep is also strongly related to decreases in fatigue (p = 0.00031).
+Moreover, getting exercise is also strongly correlated with decreases in fatigue(p = 0.00668).
+
+There are no indicators nor evidence of any collinearity; in particular, all the VIF scores are low.
 
 # Model Building
 
@@ -360,7 +381,7 @@ It is clear that fatigue is only related to lifestyle habits, but it is unknown 
 Here, we synthesize the results and perform model comparison.
 
 ```{r echo = F, results = 'hide'}
-fit <- lm(StressN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + AvgHoursExercise, data = data.train)
+fit <- lm(StressN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + LogExercise, data = data.train)
 summary(fit)
 anova(fit)
 ```
@@ -372,20 +393,31 @@ fitStress <- lm(StressN ~ ActiveSports + Distraction, data = data.train)
 summary(fitStress)
 ```
 
-Running backwards variable selection using AIC, we find that we should use the predictors ActiveSports and Distraction.
-Our final model, using predictors ActiveSports and Distraction, is
-$$
-    Stress \sim
-    \begin{cases}
-        2.463 & \text{if not active in sports and not distractive environment} \\
-        2.018 & \text{if active in sports and not distractive environment} \\
-        3.085 & \text{if not active in sports but distractive environment} \\
-        2.640 & \text{if active in sports but distractive environment}
-    \end{cases}
-$$
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+## no outliers after Bonferroni correction
+
+res <- rstudent(fitStress)
+crit <- qt(1 - 0.05 / (2 * nrow(data.train)), nrow(data.train) - 1)
+plot(res)
+abline(h = c(crit, -crit), col = "red")
+```
+
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+par(mfrow = c(2, 2))
+plot(fitStress, which = 1)  # Residuals vs Fitted
+plot(fitStress, which = 2)  # Q-Q plot
+plot(fitStress, which = 3)  # Scale-Location plot
+plot(fitStress, which = 4)  # Residuals vs Leverage
+
+# Perform Shapiro-Wilk test
+shapiro.test(resid(fitStress)) # normality assumption seems violated
+
+# Check for independence
+bptest(fitStress)
+```
 
 ```{r echo = F, results = 'hide'}
-fit <- lm(FatigueN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + AvgHoursExercise, data = data.train)
+fit <- lm(FatigueN ~ Time * Mouse + Distraction + NoiseLevel + ActiveSports + ActiveGame + LastNightSleep + LogExercise, data = data.train)
 summary(fit)
 anova(fit)
 ```
@@ -393,8 +425,22 @@ anova(fit)
 ```{r echo = F, results = 'hide'}
 stepwise_model <- step(fit, direction = "backward", k = 2)
 
-fitFatigue <- lm(FatigueN ~ LastNightSleep + Distraction, data = data.train)
+fitFatigue <- lm(FatigueN ~ LastNightSleep + Distraction + LogExercise + Time, data = data.train)
 summary(fitFatigue)
+```
+
+```{r echo = F, results = 'hide', fig.show = 'hide'}
+par(mfrow = c(2, 2))
+plot(fitFatigue, which = 1)  # Residuals vs Fitted
+plot(fitFatigue, which = 2)  # Q-Q plot
+plot(fitFatigue, which = 3)  # Scale-Location plot
+plot(fitFatigue, which = 4)  # Residuals vs Leverage
+
+# Perform Shapiro-Wilk test
+shapiro.test(resid(fitFatigue)) # normality assumption seems violated
+
+# Check for independence
+bptest(fitFatigue)
 ```
 
 Running backwards variable selection using AIC, we find that we should use the predictors ActiveSports and Distraction to predict Stress.
@@ -408,16 +454,19 @@ $$
         2.640 & \text{if active in sports but distractive environment}
     \end{cases}
 $$
+Indeed, verifying all model assumptions, only the normality assumptions violated (p = 0.0023).
+There are no outliers otherwise, and indeed no high leverage points.
 
-Running backwards variable selection using AIC, we find that we should use the predictors LastNightSleep and Distraction to predict Fatigue. 
-Our final model, using predictors LastNightSleep and Distraction, is
+Running backwards variable selection using AIC, we find that we should use the predictors LastNightSleep, Distraction, LogExercise, and ResponseTime to predict Fatigue. 
+Our final model is
 $$
     Fatigue \sim
     \begin{cases}
-        3.160 - 0.118 * LastNightSleep & \text{If no distractions} \\
-        3.485 - 0.118 * LastNightSleep & \text{if distractions} \\
+        4.739 - 0.149 * LastNightSleep - 0.301 * LogExercise - 0.0016 * Time & \text{If no distractions} \\
+        5.039 - 0.149 * LastNightSleep - 0.301 * LogExercise - 0.0016 * Time & \text{If distractions} \\
     \end{cases}
 $$
+Moreover, we have no model violations (p > 0.05), including the normality assumption.
 
 ## Model Comparison
 
@@ -436,7 +485,7 @@ knitr::kable(aic, align = "c", caption = "\\label{tabs:tab4}AIC scores for diffe
 ```{r echo = F, results = 'asis'}
 fit1 <- lm(FatigueN ~ 1, data = data.train)
 fit2 <- lm(FatigueN ~ 1, data = data.train)
-fit3 <- lm(FatigueN ~ LastNightSleep, data = data.train)
+fit3 <- lm(FatigueN ~ LastNightSleep + LogExercise, data = data.train)
 
 aic <- t(as.data.frame(c(AIC(fitFatigue), AIC(fit1), AIC(fit2), AIC(fit3))))
 rownames(aic) <- c("AIC")
@@ -486,3 +535,12 @@ Unsurprisingly, fatigue levels are strongly correlated with one's lifestyle, nam
 
 Finally, we verified that using all three classes of predictors lead to an improved model for both Fatigue and Stress.
 Indeed, future studies should consider all not only response times, but also lifestyle, environmental factors before proposing remedies for Fatigue and Stress.
+
+It is important to acknowledge that this study is inherently limited and only observational.
+Moreover, because the responses was not anonymized, there may be biases towards the responses that would not otherwise be there.
+Performing A/B testing is an important future step to see if the predictors we have determined to be significant are causal.
+For example, it may be interesting to explore whether assigning students to work in distractive or non-distractive environments would lead to changes in stress and fatigue levels.
+
+Moreover, in this study, we treated the categories for Fatigue and Stress as numerical (1-4), while in the study they were given as ordinal.
+Perhaps further transformations of these responses would lead to improved analysis.
+In addition, changing the study question to rate their Fatigue and Stress out of 10 may lead to it being more linear.
